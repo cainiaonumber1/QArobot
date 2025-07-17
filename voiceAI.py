@@ -14,6 +14,8 @@ from streamlit_folium import folium_static
 from PIL import Image
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize, rgb2hex
+from matplotlib.font_manager import FontProperties, fontManager
+import os
 import plotly.graph_objects as go
 import numpy as np
 import json
@@ -31,7 +33,6 @@ import base64
 # import contextily as cx
 # from langchain.chains import LLMChain
 # from langchain.prompts import PromptTemplate
-# import os
 # from pydub import AudioSegment
 # import tempfile
 # import time
@@ -46,15 +47,28 @@ import base64
 st.set_page_config(page_title="QA Robot", layout="wide")
 st.title("🌍 智能数据分析问答机器人 📊")
 
+# 获取当前文件所在目录
+base_dir = os.path.dirname(__file__)
+
 # 地图配置参数（可根据实际情况调整）
-shp_path = r"E:\Spyder work\AI\geo\JSExpwy2025.shp"
-image_path = r"E:\Spyder work\AI\geo\江苏省OSM_220919152142_L10\OSM_220919152142.png"
+shp_path = os.path.join(base_dir, "支撑文件", "JSExpwy2025.shp")
+image_path = os.path.join(base_dir, "支撑文件", "OSM_220919152142.png")
 # Folium 格式 [[min_lat, min_lon], [max_lat, max_lon]]
 image_bounds = [[29.8406439, 115.3125], [35.7465123, 123.3984375]]
 
+# 加载中文字体
+font_path = os.path.join(base_dir, "simhei.ttf")
+if os.path.exists(font_path):
+    fontManager.addfont(font_path)
+    prop = FontProperties(fname=font_path)
+    plt.rcParams['font.sans-serif'] = [prop.get_name()]
+else:
+    st.warning("⚠️ 字体文件 SimHei.ttf 未找到，中文可能无法显示")
+
+plt.rcParams['axes.unicode_minus'] = False
 
 def load_coordinates():
-    coords_path = r"E:\Spyder work\AI\测试文件\坐标表.xlsx"
+    coords_path = os.path.join(base_dir, "支撑文件", "坐标表.xlsx")
     df_coords = pd.read_excel(coords_path)
     return df_coords
 
