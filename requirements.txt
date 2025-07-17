@@ -1,0 +1,13 @@
+streamlit
+pandas
+numpy
+matplotlib
+pillow
+geopandas
+folium
+streamlit-folium
+plotly
+openai
+langchain-experimental
+httpx==0.27.2
+pyaudio
