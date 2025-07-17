@@ -6,6 +6,7 @@ Created on Tue Jul  1 09:59:16 2025
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import geopandas as gpd
 import folium
@@ -19,21 +20,26 @@ import json
 from openai import OpenAI
 from langchain_experimental.utilities import PythonREPL
 import httpx  # Version: 0.27.2
-import threading
-import queue
-import wave
 import io
-import pyaudio
+import base64
+
+# import wave
+# import pyaudio
+# import threading
+# import queue
+
 # import contextily as cx
 # from langchain.chains import LLMChain
 # from langchain.prompts import PromptTemplate
 # import os
-# import base64
 # from pydub import AudioSegment
 # import tempfile
 # import time
 
 # streamlit run "E:\Spyder work\AI\voiceAI.py"
+# git add .
+# git commit -m "Update files"
+# git push
 
 
 # 设置页面布局
@@ -251,47 +257,6 @@ def transcribe_audio(audio_bytes):
         return None
 
 
-# 录音函数
-def record_audio(stop_event, audio_queue):
-    # 录音参数
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 1
-    RATE = 16000
-    CHUNK = 1024
-    audio = pyaudio.PyAudio()
-
-    # 打开音频流
-    stream = audio.open(format=FORMAT,
-                        channels=CHANNELS,
-                        rate=RATE,
-                        input=True,
-                        frames_per_buffer=CHUNK)
-
-    frames = []
-
-    # 开始录音
-    while not stop_event.is_set():
-        data = stream.read(CHUNK)
-        frames.append(data)
-
-    # 停止录音
-    stream.stop_stream()
-    stream.close()
-    audio.terminate()
-
-    # 将音频数据转换为WAV格式
-    wav_io = io.BytesIO()
-    wf = wave.open(wav_io, 'wb')
-    wf.setnchannels(CHANNELS)
-    wf.setsampwidth(audio.get_sample_size(FORMAT))
-    wf.setframerate(RATE)
-    wf.writeframes(b''.join(frames))
-    wf.close()
-
-    # 将音频数据放入队列
-    audio_queue.put(wav_io.getvalue())
-
-
 # 侧边栏设置
 with st.sidebar:
     st.header("⚙️ 配置")
@@ -305,16 +270,10 @@ with st.sidebar:
         st.session_state.full_data = None
     if 'audio_bytes' not in st.session_state:
         st.session_state.audio_bytes = None
+    if 'audio_b64' not in st.session_state:
+        st.session_state.audio_b64 = None  # 新增：用于存储浏览器录音数据
     if 'transcribed_text' not in st.session_state:
         st.session_state.transcribed_text = ""
-    if 'recording' not in st.session_state:
-        st.session_state.recording = False
-    if 'record_thread' not in st.session_state:
-        st.session_state.record_thread = None
-    if 'stop_event' not in st.session_state:
-        st.session_state.stop_event = threading.Event()
-    if 'audio_queue' not in st.session_state:
-        st.session_state.audio_queue = queue.Queue()
 
     # 文件处理逻辑
     if uploaded_file is not None:
@@ -691,70 +650,124 @@ def generate_od_lines(od_data):
     return fig
 
 
+if 'audio_b64' not in st.session_state:
+    st.session_state.audio_b64 = None
+
+
 # 主界面布局
 col1, col2 = st.columns([2, 2])
 
-
 with col1:
     st.header("❓ 提问区")
-    # 修改录音控制部分
     st.subheader("🎤 语音输入")
-    if st.session_state.recording:
-        st.warning("录音中... 请说话")
-    # 显示录制的音频
-    if st.session_state.audio_bytes:
-        st.audio(st.session_state.audio_bytes, format="audio/wav")
-    # 录音控制按钮
+
+    if 'audio_b64' in st.session_state and st.session_state.audio_b64:
+        audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
+        st.audio(audio_bytes, format="audio/wav")
+
     col_rec1, col_rec2 = st.columns(2)
+
     with col_rec1:
-        if st.button("开始录音", disabled=st.session_state.recording):
-            # 重置状态
-            st.session_state.audio_bytes = None
-            st.session_state.transcribed_text = ""
-            st.session_state.recording = True
+        # 录音按钮控制逻辑
+        if 'recording' not in st.session_state:
+            st.session_state.recording = False
 
-            # 创建停止事件和队列
-            st.session_state.stop_event.clear()
-            st.session_state.audio_queue = queue.Queue()
+        if not st.session_state.recording:
+            if st.button("开始录音"):
+                # 嵌入HTML录音组件
+                components.html(
+                    """
+                    <script>
+                        let mediaRecorder;
+                        let chunks = [];
 
-            # 启动录音线程
-            st.session_state.record_thread = threading.Thread(
-                target=record_audio,
-                args=(st.session_state.stop_event,
-                      st.session_state.audio_queue)
-            )
-            st.session_state.record_thread.start()
-            st.rerun()
+                        // 开始录音函数
+                        const startRecording = () => {
+                            navigator.mediaDevices.getUserMedia({ audio: true })
+                                .then(stream => {
+                                    mediaRecorder = new MediaRecorder(stream);
+
+                                    mediaRecorder.ondataavailable = e => {
+                                        chunks.push(e.data);
+                                    };
+
+                                    mediaRecorder.onstop = () => {
+                                        const blob = new Blob(chunks, { type: 'audio/wav' });
+                                        const reader = new FileReader();
+
+                                        reader.onloadend = () => {
+                                            const base64data = reader.result;
+                                            window.parent.postMessage(base64data, '*');
+                                        };
+
+                                        reader.readAsDataURL(blob);
+                                    };
+
+                                    mediaRecorder.start();
+                                });
+                        }
+
+                        // 停止录音函数
+                        const stopRecording = () => {
+                            if (mediaRecorder && mediaRecorder.state === "recording") {
+                                mediaRecorder.stop();
+                                chunks = []; // 清空chunks以便下次使用
+                            }
+                        }
+
+                        // 在页面加载时绑定事件监听器
+                        document.addEventListener('DOMContentLoaded', () => {
+                            document.getElementById('startRecording').addEventListener('click', startRecording);
+                            document.getElementById('stopRecording').addEventListener('click', stopRecording);
+                        });
+
+                        // 启动录音
+                        startRecording();
+                    </script>
+                    """,
+                    height=0
+                )
+
+                st.session_state.recording = True
+                st.rerun()
+
+        if st.session_state.recording:
+            if st.button("停止录音"):
+                # 发送消息给前端以停止录音
+                components.html(
+                    """
+                    <script>
+                        window.dispatchEvent(new Event('stopRecording'));
+                    </script>
+                    """,
+                    height=0
+                )
+
+                st.session_state.recording = False
+                st.rerun()
+
+            # 监听消息
+            components.html("""
+                <script>
+                    window.addEventListener("message", event => {
+                        window.parent.postMessage({ type: "audio_data", data: event.data }, "*");
+                    });
+                </script>
+            """, height=0)
+
+            st.success("正在录音...")
 
     with col_rec2:
-        if st.button("停止录音", disabled=not st.session_state.recording):
-            # 设置停止事件
-            st.session_state.stop_event.set()
-
-            # 等待录音线程结束
-            st.session_state.record_thread.join()
-
-            # 获取音频数据
-            try:
-                audio_data = st.session_state.audio_queue.get(timeout=2)
-                st.session_state.audio_bytes = audio_data
-                st.session_state.recording = False
-                st.success("录音完成!")
-            except queue.Empty:
-                st.error("未能获取录音数据")
-    # 语音识别按钮
-    if st.button("识别语音", disabled=not bool(st.session_state.audio_bytes)):
-        if st.session_state.audio_bytes:
-            with st.spinner("正在识别语音..."):
-                transcribed = transcribe_audio(st.session_state.audio_bytes)
-                if transcribed:
-                    st.session_state.transcribed_text = transcribed
+        if st.button("识别语音", disabled=not bool(st.session_state.audio_b64)):
+            if st.session_state.audio_b64:
+                with st.spinner("正在识别语音..."):
+                    audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
+                    # 假设你有一个 transcribe_audio 函数
+                    # transcribed = transcribe_audio(audio_bytes)
+                    # st.session_state.transcribed_text = transcribed
                     st.success("语音识别成功!")
-                    st.write(f"识别结果: {transcribed}")  # 显示识别结果
-                else:
-                    st.warning("未能识别语音内容")
-        else:
-            st.warning("请先录制音频")
+            else:
+                st.warning("请先录制音频")
 
     # 模式切换按钮（新增“期望线”选项）
     modes = ["分析问答", "地图可视化", "期望线"]
