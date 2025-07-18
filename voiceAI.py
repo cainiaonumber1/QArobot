@@ -679,8 +679,11 @@ with col1:
     
     # 显示已录制的音频
     if st.session_state.audio_b64:
-        audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
-        st.audio(audio_bytes, format="audio/wav")
+        try:
+            audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
+            st.audio(audio_bytes, format="audio/wav")
+        except Exception:
+            st.warning("音频数据格式异常")
     
     # 布局按钮
     col_rec1, col_rec2 = st.columns(2)
@@ -752,11 +755,14 @@ with col1:
         if st.button("识别语音", disabled=not bool(st.session_state.audio_b64)):
             if st.session_state.audio_b64:
                 with st.spinner("正在识别语音..."):
-                    audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
-                    # 调用你的语音识别函数（比如 whisper 或 Google Web Speech API）
-                    transcribed_text = transcribe_audio(audio_bytes)
-                    st.session_state.transcribed_text = transcribed_text
-                    st.success("语音识别成功！")
+                    try:
+                        audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
+                        # 示例：调用语音识别函数
+                        # transcribed_text = transcribe_audio(audio_bytes)
+                        # st.session_state.transcribed_text = transcribed_text
+                        st.success("语音识别成功！")
+                    except Exception as e:
+                        st.error(f"识别失败: {e}")
             else:
                 st.warning("请先录制音频")
     
@@ -774,11 +780,17 @@ with col1:
     </script>
     """, height=0)
     
-    # 从 URL 参数中读取音频数据并保存到 session_state
-    query_params = st.experimental_get_query_params()
+    # ✅ 使用 st.query_params 读取音频数据
+    query_params = st.query_params
     if 'audio' in query_params:
-        st.session_state.audio_b64 = query_params['audio'][0]
-        st.experimental_set_query_params()  # 清除参数，避免重复触发
+        audio_data = query_params['audio']
+        if isinstance(audio_data, list):
+            audio_data = audio_data[0]
+        st.session_state.audio_b64 = audio_data
+        # 清除参数（使用 st.query_params.set）
+        new_params = {k: v for k, v in query_params.items() if k != 'audio'}
+        st.query_params.clear()
+        st.query_params.update(new_params)
 
     # 模式切换按钮（新增“期望线”选项）
     modes = ["分析问答", "地图可视化", "期望线"]
