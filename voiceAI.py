@@ -664,6 +664,9 @@ def generate_od_lines(od_data):
     return fig
 
 
+# 初始化 session_state
+if 'recording' not in st.session_state:
+    st.session_state.recording = False
 if 'audio_b64' not in st.session_state:
     st.session_state.audio_b64 = None
 
@@ -673,94 +676,109 @@ col1, col2 = st.columns([2, 2])
 with col1:
     st.header("❓ 提问区")
     st.subheader("🎤 语音输入")
-    if 'audio_b64' in st.session_state and st.session_state.audio_b64:
+    
+    # 显示已录制的音频
+    if st.session_state.audio_b64:
         audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
         st.audio(audio_bytes, format="audio/wav")
+    
+    # 布局按钮
     col_rec1, col_rec2 = st.columns(2)
+    
     with col_rec1:
-        # 录音按钮控制逻辑
-        if 'recording' not in st.session_state:
-            st.session_state.recording = False
         if not st.session_state.recording:
             if st.button("开始录音"):
-                # 嵌入HTML录音组件
-                components.html(
-                    """
-                    <script>
-                        let mediaRecorder;
-                        let chunks = [];
-                        // 开始录音函数
-                        const startRecording = () => {
-                            navigator.mediaDevices.getUserMedia({ audio: true })
-                                .then(stream => {
-                                    mediaRecorder = new MediaRecorder(stream);
-                                    mediaRecorder.ondataavailable = e => {
-                                        chunks.push(e.data);
+                # 嵌入录音 HTML + JS
+                components.html("""
+                <script>
+                    let mediaRecorder;
+                    let chunks = [];
+    
+                    // 开始录音
+                    function startRecording() {
+                        navigator.mediaDevices.getUserMedia({ audio: true })
+                            .then(stream => {
+                                mediaRecorder = new MediaRecorder(stream);
+                                mediaRecorder.ondataavailable = e => {
+                                    chunks.push(e.data);
+                                };
+                                mediaRecorder.onstop = () => {
+                                    const blob = new Blob(chunks, { type: 'audio/wav' });
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => {
+                                        const base64data = reader.result;
+                                        window.parent.postMessage(base64data, '*');
                                     };
-                                    mediaRecorder.onstop = () => {
-                                        const blob = new Blob(chunks, { type: 'audio/wav' });
-                                        const reader = new FileReader();
-                                        reader.onloadend = () => {
-                                            const base64data = reader.result;
-                                            window.parent.postMessage(base64data, '*');
-                                        };
-                                        reader.readAsDataURL(blob);
-                                    };
-                                    mediaRecorder.start();
-                                });
+                                    reader.readAsDataURL(blob);
+                                };
+                                mediaRecorder.start();
+                            });
+                    }
+    
+                    // 停止录音
+                    function stopRecording() {
+                        if (mediaRecorder && mediaRecorder.state === "recording") {
+                            mediaRecorder.stop();
+                            chunks = [];
                         }
-                        // 停止录音函数
-                        const stopRecording = () => {
-                            if (mediaRecorder && mediaRecorder.state === "recording") {
-                                mediaRecorder.stop();
-                                chunks = []; // 清空chunks以便下次使用
-                            }
-                        }
-                        // 在页面加载时绑定事件监听器
-                        document.addEventListener('DOMContentLoaded', () => {
-                            document.getElementById('startRecording').addEventListener('click', startRecording);
-                            document.getElementById('stopRecording').addEventListener('click', stopRecording);
-                        });
-                        // 启动录音
-                        startRecording();
-                    </script>
-                    """,
-                    height=0
-                )
+                    }
+    
+                    // 页面加载时绑定事件
+                    document.addEventListener('DOMContentLoaded', () => {
+                        window.addEventListener('stopRecording', stopRecording);
+                    });
+    
+                    // 自动开始录音
+                    startRecording();
+                </script>
+                """, height=0)
                 st.session_state.recording = True
                 st.rerun()
+    
         if st.session_state.recording:
             if st.button("停止录音"):
-                # 发送消息给前端以停止录音
-                components.html(
-                    """
-                    <script>
-                        window.dispatchEvent(new Event('stopRecording'));
-                    </script>
-                    """,
-                    height=0
-                )
+                # 触发前端停止录音
+                components.html("""
+                <script>
+                    window.dispatchEvent(new Event('stopRecording'));
+                </script>
+                """, height=0)
                 st.session_state.recording = False
                 st.rerun()
-            # 监听消息
-            components.html("""
-                <script>
-                    window.addEventListener("message", event => {
-                        window.parent.postMessage({ type: "audio_data", data: event.data }, "*");
-                    });
-                </script>
-            """, height=0)
             st.success("正在录音...")
+    
+    # 识别语音按钮
     with col_rec2:
         if st.button("识别语音", disabled=not bool(st.session_state.audio_b64)):
             if st.session_state.audio_b64:
                 with st.spinner("正在识别语音..."):
                     audio_bytes = base64.b64decode(st.session_state.audio_b64.split(',')[1])
+                    # 调用你的语音识别函数（比如 whisper 或 Google Web Speech API）
                     transcribed_text = transcribe_audio(audio_bytes)
                     st.session_state.transcribed_text = transcribed_text
-                    st.success("语音识别成功!")
+                    st.success("语音识别成功！")
             else:
                 st.warning("请先录制音频")
+    
+    # 接收前端发来的 Base64 数据并写入 session_state
+    components.html("""
+    <script>
+        window.addEventListener("message", event => {
+            if (event.data.startsWith("data:audio/wav")) {
+                // 将 Base64 音频数据通过 URL 参数传回 Streamlit
+                const url = new URL(window.parent.location);
+                url.searchParams.set('audio', event.data);
+                window.parent.location = url;
+            }
+        });
+    </script>
+    """, height=0)
+    
+    # 从 URL 参数中读取音频数据并保存到 session_state
+    query_params = st.experimental_get_query_params()
+    if 'audio' in query_params:
+        st.session_state.audio_b64 = query_params['audio'][0]
+        st.experimental_set_query_params()  # 清除参数，避免重复触发
 
     # 模式切换按钮（新增“期望线”选项）
     modes = ["分析问答", "地图可视化", "期望线"]
